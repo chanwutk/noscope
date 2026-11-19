@@ -1,0 +1,117 @@
+--- a/tensorflow/noscope/BUILD
++++ b/tensorflow/noscope/BUILD
+@@ -35,7 +35,6 @@
+         "//tensorflow/cc:cc_ops",
+         "//tensorflow/cc:ops",
+         "//tensorflow/cc:scope",
+-        "//tensorflow/noscope/darknet:yolo",
+         "//tensorflow/core:cuda",
+         "//tensorflow/core:gpu_lib",
+         "@local_config_cuda//cuda:cuda_headers"
+--- a/tensorflow/noscope/noscope.cc
++++ b/tensorflow/noscope/noscope.cc
+@@ -18,7 +18,6 @@
+ #include "tensorflow/noscope/MemoryTests.h"
+ #include "tensorflow/noscope/noscope_labeler.h"
+ #include "tensorflow/noscope/noscope_data.h"
+-#include "tensorflow/noscope/darknet/src/yolo.h"
+
+ using tensorflow::Flag;
+
+--- a/tensorflow/noscope/noscope_labeler.h
++++ b/tensorflow/noscope/noscope_labeler.h
+@@ -10,7 +10,16 @@
+
+ #include "tensorflow/noscope/filters.h"
+ #include "tensorflow/noscope/noscope_data.h"
+-#include "tensorflow/noscope/darknet/src/yolo.h"
++#include <stdexcept>
++
++namespace yolo {
++class YOLO {
++ public:
++  YOLO(const std::string&, const std::string&, int) {
++    throw std::logic_error("This NoScope build requires --replay_detector=1");
++  }
++};
++}  // namespace yolo
+
+
+ namespace noscope {
+--- a/tensorflow/noscope/noscope_labeler.cc
++++ b/tensorflow/noscope/noscope_labeler.cc
+@@ -17,8 +17,6 @@
+ #include "opencv2/opencv.hpp"
+
+ #include "tensorflow/noscope/noscope_labeler.h"
+-#include "tensorflow/noscope/darknet/src/yolo.h"
+-#include "tensorflow/noscope/darknet/src/image.h"
+
+ namespace noscope {
+
+@@ -158,61 +156,13 @@
+   }
+ }
+
+-static image ipl_to_image(IplImage* src) {
+-  unsigned char *data = (unsigned char *)src->imageData;
+-  // float *data = (float *) src->imageData;
+-  int h = src->height;
+-  int w = src->width;
+-  int c = src->nChannels;
+-  int step = src->widthStep;// / sizeof(float);
+-  image out = make_image(w, h, c);
+-  int count = 0;
+-
+-  for (int k = 0; k < c; ++k) {
+-    for (int i = 0; i < h; ++i) {
+-      for (int j = 0; j < w; ++j) {
+-        out.data[count++] = data[i*step + j*c + (2 - k)] / 255.;
+-        // out.data[count++] = data[i*step + j*c + k] / 255.;
+-      }
+-    }
+-  }
+-  return out;
+-}
+-static void noscope_rgbgr_image(image im) {
+-  int i;
+-  for (i = 0; i < im.w*im.h; ++i) {
+-    float swap = im.data[i];
+-    im.data[i] = im.data[i+im.w*im.h*2];
+-    im.data[i+im.w*im.h*2] = swap;
+-  }
+-}
+-
+ void NoscopeLabeler::RunYOLO(const bool actually_run) {
+   if (actually_run) {
+-    for (size_t i = 0; i < kNbFrames_; i++) {
+-      // Run YOLO on every unprocessed frame
+-      if (frame_status_[i] == kDistillFiltered)
+-        continue;
+-      if (frame_status_[i] == kDiffFiltered)
+-        continue;
+-      cv::Mat cpp_frame(NoscopeData::kYOLOResol_, CV_8UC3,
+-                        const_cast<uint8_t *>(&all_data_.yolo_data_[i * all_data_.kYOLOFrameSize_]));
+-
+-      IplImage frame = cpp_frame;
+-      image yolo_frame = ipl_to_image(&frame);
+-      // noscope_rgbgr_image(yolo_frame);
+-      yolo_confidence_[i] = yolo_->LabelFrame(yolo_frame);
+-      free_image(yolo_frame);
+-      /*if (yolo_confidence_[i] != 0)
+-        std::cerr << "frame " << i << ": " << yolo_confidence_[i] << "\n";*/
+-      labels_[i] = yolo_confidence_[i] > 0;
++    throw std::logic_error("This NoScope build requires --replay_detector=1");
++  }
++  for (size_t i = 0; i < kNbFrames_; i++)
++    if (frame_status_[i] == kDistillUnfiltered)
+       frame_status_[i] = kYoloLabeled;
+-    }
+-  } else {
+-    for (size_t i = 0; i < kNbFrames_; i++)
+-      if (frame_status_[i] == kDistillUnfiltered)
+-        frame_status_[i] = kYoloLabeled;
+-  }
+ }
+
+ void NoscopeLabeler::DumpConfidences(const std::string& fname,

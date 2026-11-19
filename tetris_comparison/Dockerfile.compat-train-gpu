@@ -1,0 +1,9 @@
+FROM tensorflow/tensorflow:1.15.0-gpu AS cuda
+FROM noscope-legacy-train
+
+# Reuse the published Python 2 runtime and Turing-compatible CUDA libraries.
+COPY --from=cuda /usr/local/cuda-10.0/targets/x86_64-linux/lib/ /opt/noscope-cuda/lib/
+COPY --from=cuda /usr/lib/x86_64-linux-gnu/libcudnn.so* /opt/noscope-cuda/lib/
+COPY --from=cuda /usr/local/lib/python2.7/dist-packages/ /opt/noscope-tf/
+RUN pip install --no-cache-dir enum34==1.1.10
+ENV LD_LIBRARY_PATH=/opt/noscope-cuda/lib PYTHONPATH=/noscope:/opt/noscope-tf

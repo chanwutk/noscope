@@ -302,7 +302,7 @@ def try_params(model_gen, params, data,
             output_dir, base_fname + '_' + model_name + '_summary.csv')
 
     X_train, Y_train, X_test, Y_test = data
-    nb_classes = params[1]
+    nb_classes = params[1] if len(params) > 1 else params[0]  # Permit a one-candidate shard.
     to_write = []
     for param in params:
         param_base_fname = base_fname + '_' + model_name + '_' + '_'.join(map(str, param[2:]))

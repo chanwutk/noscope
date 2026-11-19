@@ -1,0 +1,57 @@
+--- a/tensorflow/noscope/noscope.cc
++++ b/tensorflow/noscope/noscope.cc
+@@ -127,6 +127,7 @@
+   std::string nb_frames;
+   std::string start_from;
+   std::string yolo_class;
++  std::string replay_detector = "0";
+   std::string skip_small_cnn;
+   std::string skip_diff_detection;
+   std::string dumped_videos;
+@@ -147,6 +148,7 @@
+       Flag("nb_frames", &nb_frames, "Number of frames to read"),
+       Flag("start_from", &start_from, "Where to start from"),
+       Flag("yolo_class", &yolo_class, "YOLO class"),
++      Flag("replay_detector", &replay_detector, "Emit detector requests without running YOLO"),
+       Flag("skip_small_cnn", &skip_small_cnn, "0/1 skip small CNN or not"),
+       Flag("skip_diff_detection", &skip_diff_detection, "0/1 skip diff detection or not"),
+       Flag("dumped_videos", &dumped_videos, ""),
+@@ -162,7 +164,8 @@
+   const size_t kSkip = std::stoi(skip);
+   const size_t kNbFrames = std::stoi(nb_frames);
+   const size_t kStartFrom = std::stoi(start_from);
+-  const int kYOLOClass = std::stoi(yolo_class);
++  const bool kReplayDetector = std::stoi(replay_detector);
++  const int kYOLOClass = kReplayDetector ? 0 : std::stoi(yolo_class);
+   const bool kSkipSmallCNN = std::stoi(skip_small_cnn);
+   const bool kSkipDiffDetection = std::stoi(skip_diff_detection);
+   const bool kUseBlocked = std::stoi(use_blocked);
+@@ -172,12 +175,18 @@
+     return -1;
+   }
+
++  if (kReplayDetector && kSkipSmallCNN) {
++    LOG(ERROR) << "Detector replay requires the small CNN";
++    return -1;
++  }
++
+   if (diff_detection_weights != "/dev/null" && !kSkipDiffDetection) {
+     noscope::filters::LoadWeights(diff_detection_weights);
+   }
+
+   tensorflow::Session *session = InitSession(graph);
+-  yolo::YOLO *yolo_classifier = new yolo::YOLO(yolo_cfg, yolo_weights, kYOLOClass);
++  yolo::YOLO *yolo_classifier = kReplayDetector ? nullptr :
++      new yolo::YOLO(yolo_cfg, yolo_weights, kYOLOClass);
+   noscope::NoscopeData *data = LoadVideo(video, dumped_videos, kSkip, kNbFrames, kStartFrom);
+   noscope::filters::DifferenceFilter df = GetDiffFilter(kUseBlocked, kSkipDiffDetection);
+
+@@ -198,7 +207,7 @@
+     labeler.RunSmallCNN(distill_thresh_lower, distill_thresh_upper);
+   }
+   auto dist_end = std::chrono::high_resolution_clock::now();
+-  labeler.RunYOLO(true);
++  labeler.RunYOLO(!kReplayDetector);
+   auto yolo_end = std::chrono::high_resolution_clock::now();
+   std::vector<double> runtimes(4);
+   {

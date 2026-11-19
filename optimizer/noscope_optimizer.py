@@ -12,6 +12,7 @@ DIRNAME = os.path.dirname(os.path.realpath(__file__))
 POOL_SIZE = 48
 
 GRID_SIZE = 1000
+SKIP_DISTANCES = (10, 30)
 
 def cnn_param_grid_search(p):
     # unpack the params 
@@ -135,7 +136,7 @@ def param_search(yolo_frames, noscope_stats, noscope_frames,
     nodd_results = []
     nocnn_results = []
     cnn_grid_search_params = []
-    for skip_distance in [10, 30]:
+    for skip_distance in SKIP_DISTANCES:
 
         diff_confidences = np.asarray( map(lambda x: x['diff_confidence'], noscope_frames) )
 
