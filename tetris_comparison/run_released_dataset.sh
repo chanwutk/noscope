@@ -4,9 +4,14 @@ set -eu
 comparison=$(cd "$(dirname "$0")" && pwd)
 checkout=$(cd "$comparison/.." && pwd)
 dataset=$1
+gpu=$3
 base=/data/cwkt/data/noscope-pilot/$dataset
-data="$base/stride-15"
-export NOSCOPE_STRIDE=15
+export NOSCOPE_STRIDE=$2
+case "$NOSCOPE_STRIDE" in
+    5|15) ;;
+    *) echo "Unsupported NoScope stride: $NOSCOPE_STRIDE" >&2; exit 2 ;;
+esac
+data="$base/stride-$NOSCOPE_STRIDE"
 
 idle_gpus() {
     nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader,nounits |
@@ -26,7 +31,7 @@ done
 
 mkdir -p "$data"
 exec 9>"$data/.lock"
-flock -n 9 || { echo "$dataset stride-15 run is already active" >&2; exit 1; }
+flock -n 9 || { echo "$dataset stride-$NOSCOPE_STRIDE run is already active" >&2; exit 1; }
 for item in released-inputs compat-gpu-shards; do
     [ -e "$data/$item" ] || cp -al "$base/$item" "$data/"
 done
@@ -40,10 +45,20 @@ done
 "$comparison/calibrate_released.sh" "$data"
 [ "$(find "$data/released-calibration" -name 'convnet_*.json' | wc -l)" -eq 12 ]
 
-if [ -s "$data/released-test/run.json" ] && [ -s "$data/released-test/predictions.npz" ]; then
-    echo "Reusing $dataset stride-15 predictions"
-    exit 0
+output="$data/released-test-serial"
+mkdir -p "$output"
+device=$(nvidia-smi -i "$gpu" --query-gpu=uuid,name --format=csv,noheader)
+[ -n "$device" ]
+if [ -e "$output/device.txt" ]; then
+    original_device=$(cat "$output/device.txt")
+    [ "${original_device#*, }" = "${device#*, }" ] ||
+        { echo "Use the original GPU model to resume $dataset" >&2; exit 1; }
+else
+    printf '%s\n' "$device" > "$output/device.txt"
 fi
-set -- $(idle_gpus)
-[ "$#" -gt 0 ] || { echo "No idle GPU for $dataset test inference" >&2; exit 1; }
-"$comparison/test_released.sh" "$checkout/speedhax" "$data" "$1"
+for repeat in 1 2 3; do
+    echo "$dataset stride $NOSCOPE_STRIDE repeat $repeat of 3"
+    "$comparison/test_released.sh" "$checkout/speedhax" "$data" "$gpu" "$output/repeat-$repeat" "$device"
+done
+docker run --rm --entrypoint python -v "$comparison:/work:ro" -v "$data:/inputs:ro" \
+    -v "$output:/output" polyis-polyis /work/released_results.py retime /inputs /output

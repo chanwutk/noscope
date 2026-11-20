@@ -1,17 +1,26 @@
 # NoScope for the Tetris comparison
 
-Run this command from the Tetris workspace root.
+From the Tetris workspace root, pass the index of an idle GPU on `bombe`.
 
 ```sh
-./noscope/tetris_comparison/run_stride15.sh
+./noscope/tetris_comparison/run_comparison.sh 0
 ```
 
-This runs CalDoT1, CalDoT2, and Amsterdam in order. To run just CalDoT1, pass its dataset name.
+The command runs CalDoT1, CalDoT2, Amsterdam, and B3D1–B3D4 (`jnc0`, `jnc2`, `jnc6`, `jnc7`). To run a subset, pass the dataset names after the GPU index.
 
 ```sh
-./noscope/tetris_comparison/run_stride15.sh caldot1-y05
+./noscope/tetris_comparison/run_comparison.sh 0 caldot1-y05
 ```
 
-The command expects the released inference binary, the 12 trained CNN graphs, the prepared validation and test inputs, and the detector timing manifest staged on `bombe`. It uses the §7.3 scorer in the `polyis` container on `ace`. See [environment and training setup](tetris_comparison/README.md) to prepare these inputs.
+Stage the inputs, trained CNNs, and inference binary using the [setup guide](tetris_comparison/README.md). The runner reuses completed stages and scores predictions with the §7.3 evaluator in the `polyis` container on `ace`.
 
-For each dataset, the command profiles all 12 CNNs at stride 15 on validation, tunes the released global-MSE cascade at the paired 0%, 1%, and 2% FP/FN targets, then scores the selected configurations on held-out frames. It reuses completed stages and does not retrain the CNNs. Outputs are under `tetris/measurements-results/r7o3_noscope/<dataset>/stride-15/`, including `scores.json`.
+For each dataset, it profiles the same 12 CNNs at strides **5 and 15** using 30-frame validation windows. It tunes the released global-MSE cascade separately for each stride at the default paired FP/FN targets of 0%, 1%, 2%, 3%, 4%, 5%, 10%, and 25%.
+
+Each stride and target runs three times on the specified GPU, one trial at a time. The runner verifies identical decisions across repeats and reports the median combined frame-difference and CNN time plus the cached detector charge. Each replacement trial records its device if resumed on a different GPU of the same model.
+
+Results go under `tetris/measurements-results/r7o3_noscope/<dataset>/`.
+
+- `stride-5-serial/scores.json` and `stride-15-serial/scores.json` contain every held-out score and timing trial.
+- `scores-selected.json` contains the held-out score of the plan with the lowest validation `optimizer_cost` across both strides for each target. Equal costs favor the shorter stride.
+
+For the paper comparison, use the FPS–F1 Pareto frontier of `scores-selected.json` and pick the point closest to LEAP in FPS. Break ties by higher F1, then lower validation error target.

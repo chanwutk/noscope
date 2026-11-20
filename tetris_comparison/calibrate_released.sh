@@ -27,7 +27,8 @@ frames = frames // 30 * 30
 reference = "/data/released-inputs/valid.csv"
 profile = "/data/released-validation/{}.csv".format(model)
 results = []
-for target in (0.0, 0.01, 0.02):
+# Default sweep of paired FP/FN targets (TARGET_ERROR_RATES in optimizer/noscope_motherdog.py).
+for target in (0.25, 0.1, 0.05, 0.04, 0.03, 0.02, 0.01, 0.0):
     plan = optimizer.main("car", reference, profile, target, target, 0, frames)
     plan["target"] = target
     results.append(plan)

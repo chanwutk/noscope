@@ -4,6 +4,7 @@ import csv
 import json
 import math
 from pathlib import Path
+from shutil import copyfile
 
 import numpy as np
 
@@ -12,7 +13,7 @@ from replay_legacy import replay
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('plans', 'collect'))
+    parser.add_argument('mode', choices=('plans', 'collect', 'retime'))
     parser.add_argument('data', type=Path)
     parser.add_argument('output', type=Path)
     return parser.parse_args()
@@ -29,7 +30,7 @@ def choose_plans(data):
             if math.isfinite(cost) and (target not in by_target or cost < by_target[target]['optimizer_cost']):
                 by_target[target] = dict(plan, graph=str(model.relative_to(data)),
                                          stride=plan['threshold_skip_distance'])
-    assert set(by_target) == {0.0, 0.01, 0.02}
+    assert set(by_target) == {0.25, 0.1, 0.05, 0.04, 0.03, 0.02, 0.01, 0.0}
     return [by_target[target] for target in sorted(by_target)]
 
 
@@ -64,6 +65,63 @@ def collect(data, output, plans):
     (output / 'run.json').write_text(json.dumps(result, indent=2) + '\n')
 
 
+def decision_trace(path):
+    with path.open() as source:
+        rows = csv.reader(line for line in source if not line.startswith('#'))
+        return [(frame, status, label) for frame, status, _, _, _, label in rows if status != '1']
+
+
+def retime(data, output):
+    repeats = [output / f'repeat-{i}' for i in (1, 2, 3)]
+    original = data / 'released-test'
+    if not (original / 'run.json').is_file():
+        original = repeats[0]
+    result = json.loads((original / 'run.json').read_text())
+    plans = json.loads((original / 'plans.json').read_text())
+    runs = []
+    with np.load(original / 'predictions.npz') as archive:
+        selected = archive['selected']
+    for repeat in repeats:
+        assert json.loads((repeat / 'plans.json').read_text()) == plans, repeat
+        with np.load(repeat / 'predictions.npz') as archive:
+            assert np.array_equal(archive['selected'], selected), repeat
+        run = json.loads((repeat / 'run.json').read_text())
+        assert all(run[key] == result[key] for key in ('frames', 'clips', 'detector_ms_per_frame')), repeat
+        assert len(run['records']) == len(plans), repeat
+        runs.append(run['records'])
+
+    original_device = (output / 'device.txt').read_text().strip()
+    devices = {original_device}
+    timing_keys = ('difference_seconds', 'cnn_seconds', 'fps')
+    # Pick the measured repetition with the median sum of the two native timers.
+    for i, (record, *trials) in enumerate(zip(result['records'], *runs, strict=True)):
+        trace = decision_trace(original / f'test-{i}.csv')
+        timings = []
+        for repeat, trial in zip(repeats, trials, strict=True):
+            assert decision_trace(repeat / f'test-{i}.csv') == trace, (repeat, i)
+            assert all(trial[key] == record[key] for key in ('target', 'detector_frames', 'detector_seconds')), (repeat, i)
+            assert math.isfinite(trial['fps']) and trial['fps'] > 0, (repeat, i)
+            measured = {key: trial[key] for key in timing_keys}
+            device_file = repeat / f'test-{i}.device'
+            if device_file.is_file():
+                device = device_file.read_text().strip()
+                if device != original_device:
+                    measured['device'] = device
+                    devices.add(device)
+            timings.append(measured)
+        median = sorted(timings, key=lambda trial: trial['difference_seconds'] + trial['cnn_seconds'])[1]
+        record.update({key: median[key] for key in timing_keys})
+        record['timing_repeats'] = timings
+    result['retiming'] = dict(device=original_device, executions='serial', statistic='median-of-three')
+    if len(devices) > 1:
+        result['retiming']['devices'] = sorted(devices)
+    for name in ('plans.json', 'predictions.npz'):
+        copyfile(original / name, output / name)
+    temporary = output / 'run.json.tmp'
+    temporary.write_text(json.dumps(result, indent=2) + '\n')
+    temporary.replace(output / 'run.json')
+
+
 def main():
     args = parse_args()
     plan_path = args.output / 'plans.json'
@@ -72,8 +130,10 @@ def main():
         if any(args.output.glob('test-*.csv')) and json.loads(plan_path.read_text()) != plans:
             raise ValueError('Selected plans changed. Use a fresh test output directory.')
         plan_path.write_text(json.dumps(plans, indent=2) + '\n')
-    else:
+    elif args.mode == 'collect':
         collect(args.data, args.output, json.loads(plan_path.read_text()))
+    else:
+        retime(args.data, args.output)
 
 
 if __name__ == '__main__':
